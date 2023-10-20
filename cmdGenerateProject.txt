@@ -1,0 +1,1 @@
+cmake .. -G "Visual Studio 16 2019" -DGLEW_ROOT="C:\Github\psn2706\graphics-course-practice\lib\glew-2.1.0" -DSDL2_ROOT="C:\Github\psn2706\graphics-course-practice\lib\SDL2-2.0.16"
