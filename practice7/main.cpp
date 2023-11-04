@@ -44,7 +44,7 @@ void glew_fail(std::string_view message, GLenum error) {
 }
 
 const char vertex_shader_source[] =
-        R"(#version 330 core
+R"(#version 330 core
 
 uniform mat4 model;
 uniform mat4 view;
@@ -65,24 +65,53 @@ void main()
 )";
 
 const char fragment_shader_source[] =
-        R"(#version 330 core
+R"(#version 330 core
 
 uniform vec3 camera_position;
 
 uniform vec3 albedo;
-
 uniform vec3 ambient_light;
+
+uniform vec3 sun_direction;
+uniform vec3 sun_color;
+
+uniform vec3 point_light_position;
+uniform vec3 point_light_color;
+uniform vec3 point_light_attenuation;
+
+uniform float glossiness;
+uniform float roughness;
 
 in vec3 position;
 in vec3 normal;
 
 layout (location = 0) out vec4 out_color;
 
+vec3 specular(vec3 direction) {
+    vec3 reflected = 2.0 * normal * dot(normal, direction) - direction;
+    float power = 1 / (roughness * roughness) - 1;
+    vec3 view_direction = normalize(camera_position - position);
+    return glossiness * albedo * pow(max(0.0,
+        dot(reflected, view_direction)), power);
+}
+
+vec3 diffuse(vec3 direction) {
+    return albedo * max(0.0, dot(normal, direction)) + specular(direction);
+}
+
+float attenuation(float r) {
+    return 1.0 / dot(point_light_attenuation, vec3(1.0, r, r * r));
+}
+
 void main()
 {
     vec3 ambient = albedo * ambient_light;
-    vec3 color = ambient;
-    out_color = vec4(color, 1.0);
+    vec3 sun_light = diffuse(sun_direction) * sun_color;
+    vec3 dir = point_light_position - position;
+    float len = length(dir);
+    vec3 point_light = diffuse(dir / len) * point_light_color * attenuation(len);
+    vec3 color = ambient + sun_light + point_light;
+    out_color = vec4(color, 0.5);
 }
 )";
 
@@ -135,10 +164,10 @@ int main() try {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
     SDL_Window *window = SDL_CreateWindow("Graphics course practice 7",
-                                          SDL_WINDOWPOS_CENTERED,
-                                          SDL_WINDOWPOS_CENTERED,
-                                          800, 600,
-                                          SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        800, 600,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED);
 
     if (!window)
         sdl2_fail("SDL_CreateWindow: ");
@@ -168,6 +197,13 @@ int main() try {
     GLuint camera_position_location = glGetUniformLocation(program, "camera_position");
     GLuint albedo_location = glGetUniformLocation(program, "albedo");
     GLuint ambient_light_location = glGetUniformLocation(program, "ambient_light");
+    GLuint sun_dir_location = glGetUniformLocation(program, "sun_direction");
+    GLuint sun_color_location = glGetUniformLocation(program, "sun_color");
+    GLuint pl_pos_location = glGetUniformLocation(program, "point_light_position");
+    GLuint pl_color_location = glGetUniformLocation(program, "point_light_color");
+    GLuint pl_attenuation_location = glGetUniformLocation(program, "point_light_attenuation");
+    GLuint glossiness_location = glGetUniformLocation(program, "glossiness");
+    GLuint roughness_location = glGetUniformLocation(program, "roughness");
 
     std::string project_root = PROJECT_ROOT;
     std::string suzanne_model_path = project_root + "/suzanne.obj";
@@ -180,17 +216,17 @@ int main() try {
     glGenBuffers(1, &suzanne_vbo);
     glBindBuffer(GL_ARRAY_BUFFER, suzanne_vbo);
     glBufferData(GL_ARRAY_BUFFER, suzanne.vertices.size() * sizeof(suzanne.vertices[0]), suzanne.vertices.data(),
-                 GL_STATIC_DRAW);
+        GL_STATIC_DRAW);
 
     glGenBuffers(1, &suzanne_ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, suzanne_ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, suzanne.indices.size() * sizeof(suzanne.indices[0]), suzanne.indices.data(),
-                 GL_STATIC_DRAW);
+        GL_STATIC_DRAW);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *) (0));
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *)(0));
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *) (12));
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(obj_data::vertex), (void *)(12));
 
     auto last_frame_start = std::chrono::high_resolution_clock::now();
 
@@ -204,29 +240,54 @@ int main() try {
     float camera_x = 0.f;
     float camera_angle = 0.f;
 
+    glm::vec3 pos[9] = {
+        {-3,  3, 0}, {0,  3, 0}, {3,  3, 0},
+        {-3,  0, 0}, {0,  0, 0}, {3,  0, 0},
+        {-3, -3, 0}, {0, -3, 0}, {3, -3, 0}
+    };
+    float roughness[9] = {
+        0.1, 0.15, 0.2,
+        0.25, 0.3, 0.35,
+        0.4, 0.45, 0.5
+    };
+    float glossiness[9] = {
+        10, 15, 50,
+        100, 150, 500,
+        750, 900, 999
+    };
+
+
     bool running = true;
     while (running) {
         for (SDL_Event event; SDL_PollEvent(&event);)
             switch (event.type) {
-                case SDL_QUIT:
-                    running = false;
+            case SDL_QUIT:
+                running = false;
+                break;
+            case SDL_WINDOWEVENT:
+                switch (event.window.event) {
+                case SDL_WINDOWEVENT_RESIZED:
+                    width = event.window.data1;
+                    height = event.window.data2;
                     break;
-                case SDL_WINDOWEVENT:
-                    switch (event.window.event) {
-                        case SDL_WINDOWEVENT_RESIZED:
-                            width = event.window.data1;
-                            height = event.window.data2;
-                            break;
+                }
+                break;
+            case SDL_KEYDOWN:
+                button_down[event.key.keysym.sym] = true;
+                if (event.key.keysym.sym == SDLK_SPACE) {
+                    transparent = !transparent;
+                    if (transparent) {
+                        glEnable(GL_BLEND);
+                        glBlendEquation(GL_FUNC_ADD);
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
                     }
-                    break;
-                case SDL_KEYDOWN:
-                    button_down[event.key.keysym.sym] = true;
-                    if (event.key.keysym.sym == SDLK_SPACE)
-                        transparent = !transparent;
-                    break;
-                case SDL_KEYUP:
-                    button_down[event.key.keysym.sym] = false;
-                    break;
+                    else
+                        glDisable(GL_BLEND);
+                }
+                break;
+            case SDL_KEYUP:
+                button_down[event.key.keysym.sym] = false;
+                break;
             }
 
         if (!running)
@@ -252,6 +313,7 @@ int main() try {
         if (button_down[SDLK_KP_6])
             camera_x += 4.f * dt;
 
+
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.8f, 0.8f, 1.f, 0.f);
@@ -265,9 +327,9 @@ int main() try {
         glm::mat4 model(1.f);
 
         glm::mat4 view(1.f);
-        view = glm::translate(view, {0.f, 0.f, -camera_distance});
-        view = glm::rotate(view, camera_angle, {0.f, 1.f, 0.f});
-        view = glm::translate(view, {-camera_x, 0.f, 0.f});
+        view = glm::translate(view, { 0.f, 0.f, -camera_distance });
+        view = glm::rotate(view, camera_angle, { 0.f, 1.f, 0.f });
+        view = glm::translate(view, { -camera_x, 0.f, 0.f });
 
         float aspect = (float)height / (float)width;
         glm::mat4 projection = glm::perspective(glm::pi<float>() / 3.f, (width * 1.f) / height, near, far);
@@ -275,16 +337,26 @@ int main() try {
         glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
 
         glUseProgram(program);
-        glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
         glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
         glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
-        glUniform3fv(camera_position_location, 1, (float *) (&camera_position));
-        glUniform3f(albedo_location, 0.7f, 0.4f, 0.2f);
+        glUniform3fv(camera_position_location, 1, (float *)(&camera_position));
+        glUniform3f(albedo_location, 0.5078125f, 0.96484375f, 0.69140625f);
         glUniform3f(ambient_light_location, 0.2f, 0.2f, 0.2f);
+        glUniform3f(sun_dir_location, 0.f, std::sin(glm::pi<float>() / 3), std::cos(glm::pi<float>() / 3));
+        glUniform3f(sun_color_location, 1.0f, 1.0f, 1.0f);
+        glUniform3f(pl_pos_location, 2 * std::cos(time * 2), 0.f, 2 * std::sin(time * 2));
+        glUniform3f(pl_color_location, 1.f, 0.f, 0.f);
+        glUniform3f(pl_attenuation_location, 1.0f, 0.0f, 0.01f);
 
-        glBindVertexArray(suzanne_vao);
-        glDrawElements(GL_TRIANGLES, suzanne.indices.size(), GL_UNSIGNED_INT, nullptr);
+        for (int i = 0; i < 9; ++i) {
+            model = glm::translate(glm::mat4(1.f), pos[i]);
+            glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+            glUniform1f(glossiness_location, glossiness[i]);
+            glUniform1f(roughness_location, roughness[i]);
 
+            glBindVertexArray(suzanne_vao);
+            glDrawElements(GL_TRIANGLES, suzanne.indices.size(), GL_UNSIGNED_INT, nullptr);
+        }
         SDL_GL_SwapWindow(window);
     }
 
