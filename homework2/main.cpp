@@ -469,9 +469,15 @@ int main(int argc, char **argv) try
 
     std::map<SDL_Keycode, bool> button_down;
 
+    auto rotate_xz = [](glm::vec3 &vec, float angle) {
+        glm::mat4 rotationMatrix = glm::rotate(glm::mat4(1.0f), angle, glm::vec3(0.0f, 1.0f, 0.0f));
+        return (rotationMatrix * glm::vec4(vec, 1.0f)).xyz();
+    };
+
     float view_dy = 0.f;
     float view_dx = 0.f;
     glm::vec3 dist(x_mid, y_mid, z_mid);
+    glm::vec3 step(x_w / 15.f, 0, 0);
     bool running = true;
     while (running)
     {
@@ -499,8 +505,12 @@ int main(int argc, char **argv) try
             int x, y;
             SDL_GetMouseState(&x, &y);
 
-            view_dx += (width / 100000.f) * (x - center_x);
-            view_dy += (height / 100000.f) * (y - center_y);
+            auto [dx, dy] = std::pair { (width / 100000.f) * (x - center_x), (height / 100000.f) * (y - center_y) };
+
+            view_dx += dx;
+            view_dy += dy;
+
+            step = rotate_xz(step, -dx);
 
             SDL_WarpMouseInWindow(window, center_x, center_y);
         }
@@ -524,26 +534,23 @@ int main(int argc, char **argv) try
             view_dx += 1.25f * dt;
 
         if (button_down[SDLK_w])
-            dist.z -= z_w / 15.f * dt;
+            dist -= rotate_xz(step, -glm::pi<float>() / 2.f) * dt;
         if (button_down[SDLK_s])
-            dist.z += z_w / 15.f * dt;
-
+            dist += rotate_xz(step, -glm::pi<float>() / 2.f) * dt;
         if (button_down[SDLK_a])
-            dist.x -= x_w / 15.f * dt;
+            dist -= step * dt;
         if (button_down[SDLK_d])
-            dist.x += x_w / 15.f * dt;
+            dist += step * dt;
 
-        if (button_down[SDLK_t])
-            dist.y += y_w / 15.f * dt;
         if (button_down[SDLK_SPACE])
-            dist.y += y_w / 15.f * dt;
-        if (button_down[SDLK_LSHIFT])
-            dist.y -= y_w / 15.f * dt;
-        if (button_down[SDLK_g])
-            dist.y -= y_w / 15.f * dt;
+            dist.y += y_w / 6.f * dt;
+        if (button_down[SDLK_LSHIFT] || button_down[SDLK_LCTRL])
+            dist.y -= y_w / 6.f * dt;
 
         if (button_down[SDLK_ESCAPE])
             running = false;
+
+
 
         glm::mat4 model(1.f);
         glm::vec3 sun_direction = glm::normalize(glm::vec3(std::cos(time * 0.12f), 1.f, std::sin(time * 0.12f)));
@@ -619,7 +626,7 @@ int main(int argc, char **argv) try
 
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
-
+        
         float near = 0.01f;
         float far = 5000.f;
 
