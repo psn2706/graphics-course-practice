@@ -53,6 +53,7 @@ R"(#version 330 core
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
+uniform mat4 lightSpaceMatrix;
 
 layout (location = 0) in vec3 in_position;
 layout (location = 1) in vec3 in_normal;
@@ -61,6 +62,7 @@ layout (location = 2) in vec2 in_texcoord;
 out vec3 position;
 out vec3 normal;
 out vec2 texcoord;
+out vec4 FragPosLightSpace;
 
 void main()
 {
@@ -68,6 +70,7 @@ void main()
     position = (model * vec4(in_position, 1.0)).xyz;
     normal = normalize((model * vec4(in_normal, 0.0)).xyz);
     texcoord = (model * vec4(in_texcoord, 1.0, 1.0)).xy;
+    FragPosLightSpace = lightSpaceMatrix * vec4(position, 1.0);
 }
 )";
 
@@ -98,10 +101,27 @@ uniform vec3 camera_position;
 in vec3 position;
 in vec3 normal;
 in vec2 texcoord;
+in vec4 FragPosLightSpace;
 
 layout (location = 0) out vec4 out_color;
 
 float shadow_bias = 0.0001;
+
+float ShadowCalculation(vec4 fragPosLightSpace)
+{
+    // perform perspective divide
+    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
+    // transform to [0,1] range
+    projCoords = projCoords * 0.5 + 0.5;
+    // get closest depth value from light's perspective (using [0,1] range fragPosLight as coords)
+    float closestDepth = texture(shadow_map, projCoords.xy).r; 
+    // get depth of current fragment from light's perspective
+    float currentDepth = projCoords.z;
+    // check whether current frag pos is in shadow
+    float shadow = currentDepth > closestDepth  ? 1.0 : 0.0;
+
+    return shadow;
+}
 
 vec3 specular(vec3 dir)
 {
@@ -175,11 +195,13 @@ void main()
     vec3 to_point_light = pl_position - position;
     float R = length(to_point_light);
 
+    float shadow = ShadowCalculation(FragPosLightSpace);
+
     vec3 light = ambient;
     light += sun_color * diffuse(sun_direction) * shadow_factor;
-    light += diffuse(to_point_light / R) * pl_color * att(R);
+    light += (1.0 - shadow) * diffuse(to_point_light / R) * pl_color * att(R);
     vec3 color = albedo * light;
-
+    
     out_color = vec4(color, 1.0);
 }
 )";
@@ -311,6 +333,7 @@ int main(int argc, char **argv) try
     GLuint view_location = glGetUniformLocation(program, "view");
     GLuint projection_location = glGetUniformLocation(program, "projection");
     GLuint transform_location = glGetUniformLocation(program, "transform");
+    GLuint lightSpaceMatrix_location = glGetUniformLocation(program, "lightSpaceMatrix");
 
     // phong params
     GLuint ambient_location = glGetUniformLocation(program, "ambient");
@@ -681,6 +704,7 @@ int main(int argc, char **argv) try
         glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
         glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
         glUniformMatrix4fv(transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
+        //glUniformMatrix4fv(transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
 
         glUniform3f(ambient_location, 0.2f, 0.2f, 0.2f);
         glUniform3fv(sun_direction_location, 1, reinterpret_cast<float *>(&sun_direction));
