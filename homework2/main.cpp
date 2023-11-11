@@ -477,6 +477,10 @@ int main(int argc, char **argv) try
     float view_dy = 0.f;
     float view_dx = 0.f;
     glm::vec3 dist(x_mid, y_mid, z_mid);
+    glm::vec3 light(dist);
+    glm::vec3 light_intensive(0.000001f, 0.009f, 0.00000005f);
+    glm::vec3 light_shift(0.f);
+    glm::vec3 camera_position(dist);
     glm::vec3 step(x_w / 15.f, 0, 0);
     bool running = true;
     while (running)
@@ -501,11 +505,21 @@ int main(int argc, char **argv) try
         case SDL_KEYUP:
             button_down[event.key.keysym.sym] = false;
             break;
+        case SDL_MOUSEBUTTONDOWN:
+            button_down[event.button.button] = true;
+            break;
+        case SDL_MOUSEBUTTONUP:
+            button_down[event.button.button] = false;
+            break;
+        case SDL_MOUSEWHEEL:
+            light_intensive.z -= event.wheel.y / 100000.f;
+            light_intensive.z = std::max(light_intensive.z, 0.f);
+            break;
         case SDL_MOUSEMOTION:
             int x, y;
             SDL_GetMouseState(&x, &y);
 
-            auto [dx, dy] = std::pair { (width / 100000.f) * (x - center_x), (height / 100000.f) * (y - center_y) };
+            auto [dx, dy] = std::pair{ (width / 100000.f) * (x - center_x), (height / 100000.f) * (y - center_y) };
 
             view_dx += dx;
             view_dy += dy;
@@ -513,6 +527,7 @@ int main(int argc, char **argv) try
             step = rotate_xz(step, -dx);
 
             SDL_WarpMouseInWindow(window, center_x, center_y);
+            break;
         }
 
         if (!running)
@@ -524,14 +539,19 @@ int main(int argc, char **argv) try
 
         time += dt;
 
-        if (button_down[SDLK_UP])
-            view_dy -= 1.25f * dt;
-        if (button_down[SDLK_DOWN])
-            view_dy += 1.25f * dt;
-        if (button_down[SDLK_LEFT])
-            view_dx -= 1.25f * dt;
-        if (button_down[SDLK_RIGHT])
-            view_dx += 1.25f * dt;
+        if (button_down[SDLK_f] || button_down[SDL_BUTTON_LEFT]) {
+            light = camera_position;
+            light_shift = glm::vec3(0.f);
+        }
+
+        if (button_down[SDLK_t]) {
+            light_intensive.y -= dt / 400.f;
+            light_intensive.y = std::max(light_intensive.y, 0.f);
+        }
+        if (button_down[SDLK_g]) {
+            light_intensive.y += dt / 400.f;
+            light_intensive.y = std::max(light_intensive.y, 0.f);
+        }
 
         if (button_down[SDLK_w])
             dist -= rotate_xz(step, -glm::pi<float>() / 2.f) * dt;
@@ -541,6 +561,19 @@ int main(int argc, char **argv) try
             dist -= step * dt;
         if (button_down[SDLK_d])
             dist += step * dt;
+
+        if (button_down[SDLK_UP])
+            light_shift -= rotate_xz(step, -glm::pi<float>() / 2.f) * dt;
+        if (button_down[SDLK_DOWN])
+            light_shift += rotate_xz(step, -glm::pi<float>() / 2.f) * dt;
+        if (button_down[SDLK_LEFT])
+            light_shift -= step * dt;
+        if (button_down[SDLK_RIGHT])
+            light_shift += step * dt;
+        if (button_down[SDLK_k])
+            light_shift.y -= y_w / 15.f * dt;
+        if (button_down[SDLK_i])
+            light_shift.y += y_w / 15.f * dt;
 
         if (button_down[SDLK_SPACE])
             dist.y += y_w / 6.f * dt;
@@ -626,7 +659,7 @@ int main(int argc, char **argv) try
 
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
-        
+
         float near = 0.01f;
         float far = 5000.f;
 
@@ -635,7 +668,7 @@ int main(int argc, char **argv) try
         view = glm::rotate(view, view_dx, { 0.f, 1.f, 0.f });
         view = glm::translate(view, { -dist.x, -dist.y, -dist.z });
 
-        glm::vec3 camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
+        camera_position = (glm::inverse(view) * glm::vec4(0.f, 0.f, 0.f, 1.f)).xyz();
 
         glm::mat4 projection = glm::mat4(1.f);
         projection = glm::perspective(glm::pi<float>() / 2.f, (1.f * width) / height, near, far);
@@ -652,9 +685,10 @@ int main(int argc, char **argv) try
         glUniform3f(ambient_location, 0.2f, 0.2f, 0.2f);
         glUniform3fv(sun_direction_location, 1, reinterpret_cast<float *>(&sun_direction));
         glUniform3f(sun_color_location, 0.9f, 0.8f, 0.4f);
-        glUniform3f(pl_position_location, 0.8 * x_w * sin(time / 50), 100.f, 0.f);
+        auto finaly_light = light + light_shift;
+        glUniform3f(pl_position_location, finaly_light.x, finaly_light.y, finaly_light.z);
         glUniform3f(pl_color_location, 0.5f, 0.4f, 0.8f);
-        glUniform3f(pl_attenuation_location, 0.001f, 0.f, 0.00005f);
+        glUniform3f(pl_attenuation_location, light_intensive.x, light_intensive.y, light_intensive.z);
 
         glUniform3fv(camera_location, 1, reinterpret_cast<float *>(&camera_position));
 
