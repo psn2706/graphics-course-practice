@@ -118,7 +118,8 @@ float ShadowCalculation(vec4 fragPosLightSpace)
     // get depth of current fragment from light's perspective
     float currentDepth = projCoords.z;
     // check whether current frag pos is in shadow
-    float shadow = currentDepth > closestDepth  ? 1.0 : 0.0;
+    float bias = 0.5;
+    float shadow = currentDepth - bias > closestDepth  ? 1.0 : 0.0;
 
     return shadow;
 }
@@ -195,12 +196,24 @@ void main()
     vec3 to_point_light = pl_position - position;
     float R = length(to_point_light);
 
-    float shadow = ShadowCalculation(FragPosLightSpace);
+    
 
     vec3 light = ambient;
     light += sun_color * diffuse(sun_direction) * shadow_factor;
-    light += (1.0 - shadow) * diffuse(to_point_light / R) * pl_color * att(R);
+    light += diffuse(to_point_light / R) * pl_color * att(R);
     vec3 color = albedo * light;
+
+    //vec3 __lightColor = vec3(1.0);
+    //vec3 __lightDir = normalize(pl_position - position);
+    //float __diff = max(dot(lightDir, normal), 0.0);
+    //vec3 __light_diffuse = __diff * __lightColor;
+    //vec3 __viewDir = normalize(camera_position-position);
+    //float __spec = 0.0;
+    //vec3 __halfwayDir = normalize(__lightDir + __viewDir);
+    //__spec = pow(max(dot(normal, __halfwayDir), 0.0), 64.0);
+    //vec3 __specular = __spec * __lightColor;
+    //float shadow = ShadowCalculation(FragPosLightSpace);
+    //vec3 __lighting = (ambient + (1.0 - shadow) * (diffuse + specular)) * color;
     
     out_color = vec4(color, 1.0);
 }
@@ -593,10 +606,10 @@ int main(int argc, char **argv) try
             light_shift -= step * dt;
         if (button_down[SDLK_RIGHT])
             light_shift += step * dt;
-        if (button_down[SDLK_k])
-            light_shift.y -= y_w / 15.f * dt;
         if (button_down[SDLK_i])
             light_shift.y += y_w / 15.f * dt;
+        if (button_down[SDLK_k])
+            light_shift.y -= y_w / 15.f * dt;
 
         if (button_down[SDLK_SPACE])
             dist.y += y_w / 6.f * dt;
@@ -704,12 +717,21 @@ int main(int argc, char **argv) try
         glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
         glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection));
         glUniformMatrix4fv(transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
-        //glUniformMatrix4fv(transform_location, 1, GL_FALSE, reinterpret_cast<float *>(&transform));
 
         glUniform3f(ambient_location, 0.2f, 0.2f, 0.2f);
         glUniform3fv(sun_direction_location, 1, reinterpret_cast<float *>(&sun_direction));
         glUniform3f(sun_color_location, 0.9f, 0.8f, 0.4f);
         auto finaly_light = light + light_shift;
+        auto camera_dir = camera_position + 5.f * step;
+
+        float near_plane = 1.0f, far_plane = 7.5f;
+        glm::mat4 lightProjection = glm::ortho(x_min, x_max, z_min, z_max, near, far);
+        glm::mat4 lightView = glm::lookAt(glm::vec3(camera_position.x, camera_position.y, camera_position.z),
+            glm::vec3(1.f, 0.f, 0.f),
+            glm::vec3(0.0f, 1.0f, 0.0f));
+        
+        glm::mat4 lightSpaceMatrix = lightProjection * lightView;
+        glUniformMatrix4fv(lightSpaceMatrix_location, 1, GL_FALSE, reinterpret_cast<float *>(&lightSpaceMatrix));
         glUniform3f(pl_position_location, finaly_light.x, finaly_light.y, finaly_light.z);
         glUniform3f(pl_color_location, 0.5f, 0.4f, 0.8f);
         glUniform3f(pl_attenuation_location, light_intensive.x, light_intensive.y, light_intensive.z);
